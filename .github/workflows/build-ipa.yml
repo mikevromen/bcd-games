@@ -2,6 +2,9 @@ name: Build Madeira IPA (unsigned)
 
 on:
   workflow_dispatch:
+  # wow-test fork: build on every push to this branch.
+  push:
+    branches: [wow-test]
   # Paused while builds run on the owner's Mac (2026-10-13). To build on push
   # to main again, uncomment the three lines below.
   # push:
@@ -17,7 +20,7 @@ concurrency:
 jobs:
   build:
     # madeira-bcd: runs only in the owner's repository; a fork's run is skipped.
-    if: github.repository == 'thebcd69/madeira-bcd'
+    # wow-test fork: owner-only guard removed
     runs-on: macos-15
     # contents: write only so the token can see DRAFT releases, which is where
     # the Metal Shader Converter installer is kept (drafts are not public).
@@ -30,6 +33,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+
+      # wow-test fork: FEX stores the FS/GS selector in 64-bit mode instead of a decode failure.
+      - name: Apply wow-test FEX patch
+        run: git -C FEX apply "$GITHUB_WORKSPACE/patches-wow/fex-x64-segment-selector.patch"
 
       # ContentView.swift uses glassEffect(.regular, in:), which needs the
       # iOS 26 SDK. The runner defaults to Xcode 16.4 (iOS 18.5), so pick the
@@ -3478,38 +3485,14 @@ jobs:
       - name: Package Madeira and Madeira2 unsigned IPAs
         run: python3 tools/ota-variants.py package build-out/Madeira.xcarchive/Products/Applications/Madeira.app build-out ${{ steps.bn.outputs.n }}
 
-      # Over-the-air install: sign with the owner's certificate (kept in the
-      # owner's PRIVATE bucket, never in the repository) and put both signed IPAs
-      # plus installation pages (7-day pre-signed links) in the same bucket.
-      # A signing/upload failure is caught by the private-bucket gate below.
-      - name: Sign for OTA install (private bucket)
-        id: ota
-        continue-on-error: true
-        env:
-          B2_KEY_ID: ${{ secrets.B2_KEY_ID }}
-          B2_APP_KEY: ${{ secrets.B2_APP_KEY }}
-          B2_S3_ENDPOINT: ${{ secrets.B2_S3_ENDPOINT }}
-          B2_SIGN_BUCKET: ${{ secrets.B2_SIGN_BUCKET }}
-          SIGN_P12_PASSWORD: ${{ secrets.SIGN_P12_PASSWORD }}
-          OTA_MAIL_USER: ${{ secrets.OTA_MAIL_USER }}
-          OTA_MAIL_APP_PASSWORD: ${{ secrets.OTA_MAIL_APP_PASSWORD }}
-          OTA_MAIL_TO: ${{ secrets.OTA_MAIL_TO }}
-          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          R2_BUCKET: ${{ secrets.R2_BUCKET }}
-        run: bash tools/sign-and-publish-ota.sh build-out/Madeira-0.1.${{ steps.bn.outputs.n }}-unsigned.ipa ${{ steps.bn.outputs.n }} build-out/Madeira2-0.1.${{ steps.bn.outputs.n }}-unsigned.ipa
-
-      # Owner's decision (2026-10-02): no IPA artifact on GitHub at all. The
-      # repository and its Actions are public, so an artifact is downloadable by
-      # anyone; the only copy of a build is the signed IPA in the owner's
-      # private R2 bucket (the OTA step above). If that step did not succeed,
-      # the build fails here instead of keeping the IPA somewhere public.
-      - name: Check the IPA reached the private bucket
-        if: steps.ota.outcome != 'success'
-        run: |
-          echo "::error::OTA signing/upload did not succeed: this build's IPA was not kept anywhere (no GitHub artifact by design)"
-          exit 1
+      # wow-test fork: no owner signing. Keep the unsigned IPAs as a short-lived artifact
+      # (re-sign with SideStore/AltStore/LiveContainer on the device).
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bcd-wow-test-unsigned-ipa
+          path: build-out/*-unsigned.ipa
+          retention-days: 2
+          if-no-files-found: error
 
       # Full logs as an artifact -- the annotations above are truncated, and
       # digging them out of the raw job log is painful.

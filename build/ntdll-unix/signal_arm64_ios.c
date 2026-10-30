@@ -8974,6 +8974,47 @@ static void setup_exception( ucontext_t *sigcontext, EXCEPTION_RECORD *rec )
     }
 #endif
     save_context( &context, sigcontext );
+#ifdef WINE_IOS
+    /* EXPERIMENTAL, opt-in (env.MADEIRA_CTX_PE_PC = 1), native ARM64 processes only
+     * (World of Warcraft's WowClassic-arm64.exe / Wow-arm64.exe).
+     *
+     * The record above carries the PE VA, but the CONTEXT handed to the guest's
+     * handlers kept the JIT-pool pc and lr. WoW executes a deliberate `udf #0x9720`
+     * right after its TLS callbacks; its handler sees Pc/Lr outside its own module
+     * (pool 0x16b7956c8, module 0x708b840000+0x5dc7000), resumes into a poisoned path
+     * (x1 = 0, AV at RVA 0x53ec) and exits with code 1 (log 2026-10-29 11:41,
+     * build 611). On Windows Pc and Lr are always inside the module.
+     *
+     * Translate both to PE VAs. Resuming at a PE VA is already handled: the backing
+     * is not executable, the execute fault is redirected to the pool copy
+     * (segv_handler / bus_handler "Execution fault at PE address"). ARM64EC
+     * processes are left alone (their pc semantics belong to FEX). */
+    {
+        static int on = -1;
+        extern int ios_is_arm64ec_cur(void);
+        if (on < 0)
+        {
+            const char *e = getenv( "MADEIRA_CTX_PE_PC" );
+            on = (e && e[0] == '1' && !e[1]) ? 1 : 0;
+        }
+        if (on && !ios_is_arm64ec_cur())
+        {
+            extern uint64_t ios_jit_reverse_translate( uint64_t addr, uint64_t *module_base );
+            uint64_t pe_pc = ios_jit_reverse_translate( (uint64_t)context.Pc, NULL );
+            uint64_t pe_lr = ios_jit_reverse_translate( (uint64_t)context.Lr, NULL );
+            static int said;
+            if (said < 32 && (pe_pc || pe_lr))
+            {
+                said++;
+                dprintf( 2, "[ctx-pe-pc] code=%08x pc %p -> %p, lr %p -> %p\n",
+                         (unsigned int)rec->ExceptionCode, (void *)context.Pc, (void *)(uintptr_t)pe_pc,
+                         (void *)context.Lr, (void *)(uintptr_t)pe_lr );
+            }
+            if (pe_pc) context.Pc = pe_pc;
+            if (pe_lr) context.Lr = pe_lr;
+        }
+    }
+#endif
     setup_raise_exception( sigcontext, rec, &context );
 }
 

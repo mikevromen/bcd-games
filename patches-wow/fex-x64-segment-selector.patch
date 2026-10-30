@@ -1,0 +1,34 @@
+diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
+index 3c42f47ee..0edd1ebe5 100644
+--- a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
++++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
+@@ -1289,8 +1289,12 @@ void OpDispatchBuilder::MOVSegOp(OpcodeArgs, bool ToSeg) {
+         _StoreContextGPR(OpSize::i16Bit, Src, offsetof(FEXCore::Core::CPUState, gs_idx));
+         UpdatePrefixFromSegment(Src, FEXCore::X86Tables::DecodeFlags::FLAG_GS_PREFIX);
+       } else {
+-        LogMan::Msg::EFmt("We don't support modifying GS selector in 64bit mode!");
+-        DecodeFailure = true;
++        // madeira-bcd (experimental): x64 Windows lets user mode load the GS selector. The
++        // value is what a later `mov r16, gs` reads back; the segment BASE (TEB for GS)
++        // is not touched, as with FSGSBASE. Protected code (World of Warcraft's loader) writes
++        // and reads it back as an anti-debug check; a decode failure here made it take the
++        // "debugged" path. Store the selector only; do not update the prefix base.
++        _StoreContextGPR(OpSize::i16Bit, Src, offsetof(FEXCore::Core::CPUState, gs_idx));
+       }
+       break;
+     case FEXCore::X86State::REG_RSP: // FS
+@@ -1299,8 +1303,12 @@ void OpDispatchBuilder::MOVSegOp(OpcodeArgs, bool ToSeg) {
+         _StoreContextGPR(OpSize::i16Bit, Src, offsetof(FEXCore::Core::CPUState, fs_idx));
+         UpdatePrefixFromSegment(Src, FEXCore::X86Tables::DecodeFlags::FLAG_FS_PREFIX);
+       } else {
+-        LogMan::Msg::EFmt("We don't support modifying FS selector in 64bit mode!");
+-        DecodeFailure = true;
++        // madeira-bcd (experimental): x64 Windows lets user mode load the FS selector. The
++        // value is what a later `mov r16, fs` reads back; the segment BASE (TEB for GS)
++        // is not touched, as with FSGSBASE. Protected code (World of Warcraft's loader) writes
++        // and reads it back as an anti-debug check; a decode failure here made it take the
++        // "debugged" path. Store the selector only; do not update the prefix base.
++        _StoreContextGPR(OpSize::i16Bit, Src, offsetof(FEXCore::Core::CPUState, fs_idx));
+       }
+       break;
+     default: UnimplementedOp(Op); return;
